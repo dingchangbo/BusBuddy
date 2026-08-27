@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { TransitStop, RouteArrivalData } from '../types';
+import { TransitStop, RouteArrivalData, LtaBusArrivalResponse } from '../types';
 import { OccupancyBadge } from './OccupancyBadge';
 import { STOP_MAP_IMAGE_URL } from '../data/transitData';
 import {
@@ -7,6 +7,7 @@ import {
   transformLtaArrivals,
   generateRealTimeArrivalsForServices,
   mergeArrivalsWithKnownServices,
+  formatLiveCountdown,
 } from '../services/ltaService';
 
 interface StopArrivalScreenProps {
@@ -27,12 +28,24 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(20);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedServiceFilter, setSelectedServiceFilter] = useState<string>('ALL');
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>(new Date().toLocaleTimeString());
+  const [rawApiResponse, setRawApiResponse] = useState<LtaBusArrivalResponse | null>(null);
+  const [showApiInspector, setShowApiInspector] = useState(false);
+  const [now, setNow] = useState<number>(Date.now());
+
+  // Second-by-second high-frequency tick for real-time countdowns
+  useEffect(() => {
+    const ticker = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(ticker);
+  }, []);
+
   const [liveArrivals, setLiveArrivals] = useState<RouteArrivalData[]>(() => {
     const services = stop.routes && stop.routes.length > 0 ? stop.routes : ['15', '31', '36', '43', '48', '196', '197'];
     return generateRealTimeArrivalsForServices(stop.id, services);
   });
-  const [isLiveConnected, setIsLiveConnected] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string>(new Date().toLocaleTimeString());
 
   // Consolidate list of all bus services known for this stop
   const allKnownServices = useMemo(() => {
@@ -63,13 +76,14 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
     const res = await fetchLiveBusArrival(stop.id, serviceParam);
 
     if (res.data && res.data.Services && res.data.Services.length > 0) {
+      setRawApiResponse(res.data);
       const transformed = transformLtaArrivals(res.data);
       // Merge live LTA feed with all known services so NO service is omitted
       const merged = mergeArrivalsWithKnownServices(transformed, servicesForStop, stop.id);
       setLiveArrivals(merged);
       setIsLiveConnected(true);
     } else {
-      // Generate real-time synthetic arrivals for all services for this stop
+      // Generate real-time synthetic arrivals for all services for this stop with fresh epoch timestamps
       const generated = generateRealTimeArrivalsForServices(stop.id, servicesForStop);
       setLiveArrivals(generated);
       setIsLiveConnected(res.isConfigured && !res.error);
@@ -100,17 +114,17 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
     return () => clearInterval(timer);
   }, [refreshArrivals]);
 
-  // Create a quick lookup map for next arrival minutes by service
+  // Quick lookup for next arrival formatted countdown by service
   const serviceNextArrivalMap = useMemo(() => {
-    const map = new Map<string, number | string>();
+    const map = new Map<string, { text: string; isArriving: boolean }>();
     liveArrivals.forEach((r) => {
       if (r.arrivals && r.arrivals.length > 0 && r.arrivals[0]) {
-        const m = r.arrivals[0].minutes;
-        map.set(r.routeNumber, m <= 0 ? 'Arr' : `${m}m`);
+        const countdown = formatLiveCountdown(r.arrivals[0].estimatedArrivalTimestamp, r.arrivals[0].minutes);
+        map.set(r.routeNumber, { text: countdown.text, isArriving: countdown.isArriving });
       }
     });
     return map;
-  }, [liveArrivals]);
+  }, [liveArrivals, now]); // Re-computes every second
 
   // Displayed arrival routes (filtered if user selected specific service)
   const displayedRoutes = useMemo(() => {
@@ -122,19 +136,19 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
 
   return (
     <div className="flex-grow w-full max-w-7xl mx-auto px-4 md:px-8 py-6 flex flex-col gap-6">
-      {/* Navigation Breadcrumb / Top Row */}
+      {/* Navigation Breadcrumb & Live Refresh Status Bar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <button
           id="btn-back-to-search"
           onClick={onBackToSearch}
-          className="inline-flex items-center gap-1.5 text-[#003d9b] hover:text-[#001848] font-label-caps text-xs font-bold transition-colors cursor-pointer py-1.5 px-3 rounded-lg bg-[#ffffff] border border-[#c3c6d6] hover:bg-[#f3f3fd] shadow-xs"
+          className="inline-flex items-center gap-1.5 text-[#003d9b] hover:text-[#001848] font-label-caps text-xs font-bold transition-colors cursor-pointer py-2 px-3.5 rounded-xl bg-[#ffffff] border border-[#c3c6d6] hover:bg-[#f3f3fd] shadow-xs active:scale-95"
         >
           <span className="material-symbols-outlined text-[18px]">arrow_back</span>
           <span>Back to Stop Search</span>
         </button>
 
         {/* Live sync ticker (20-second refresh indicator) */}
-        <div className="flex items-center gap-2 font-label-caps text-xs text-[#515f74] bg-[#ffffff] border border-[#c3c6d6] px-3 py-1.5 rounded-lg shadow-xs">
+        <div className="flex items-center gap-2 font-label-caps text-xs text-[#515f74] bg-[#ffffff] border border-[#c3c6d6] px-3.5 py-2 rounded-xl shadow-xs">
           <span className="inline-flex items-center gap-1.5">
             <span
               className={`w-2.5 h-2.5 rounded-full ${
@@ -142,18 +156,21 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
               }`}
             />
             <span className="font-bold text-[#191b23]">
-              {isLiveConnected ? 'LTA DataMall v3 Live' : 'LTA Live Data Stream'}
+              {isLiveConnected ? 'LTA DataMall v3 Live Stream' : 'Live Transit Stream'}
             </span>
           </span>
-          <span>•</span>
-          <span className="tabular-nums">Auto-refresh in {secondsUntilRefresh}s</span>
-          <span>•</span>
+          <span className="text-[#c3c6d6]">•</span>
+          <span className="tabular-nums font-semibold text-[#003d9b]">
+            Auto-refresh in {secondsUntilRefresh}s
+          </span>
+          <span className="text-[#c3c6d6] hidden sm:inline">•</span>
           <span className="text-[#737685] hidden sm:inline">Updated {lastUpdated}</span>
+
           <button
             id="btn-manual-refresh"
             onClick={refreshArrivals}
             disabled={isRefreshing}
-            className={`p-1 text-[#434654] hover:text-[#003d9b] rounded-full transition-all cursor-pointer ${
+            className={`p-1.5 text-[#434654] hover:text-[#003d9b] hover:bg-[#ededf8] rounded-lg transition-all cursor-pointer ${
               isRefreshing ? 'animate-spin text-[#003d9b]' : ''
             }`}
             title="Refresh LTA arrival estimates now"
@@ -161,8 +178,68 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
           >
             <span className="material-symbols-outlined text-[18px]">refresh</span>
           </button>
+
+          <button
+            id="btn-toggle-api-inspector"
+            onClick={() => setShowApiInspector(!showApiInspector)}
+            className="ml-1 px-2 py-1 bg-[#ededf8] hover:bg-[#e1e2ec] text-[#003d9b] rounded-md text-[10px] font-bold cursor-pointer transition-colors"
+            title="View Raw LTA API Output"
+          >
+            {showApiInspector ? 'Hide API' : 'API Output'}
+          </button>
         </div>
       </div>
+
+      {/* Raw API Output Inspector Drawer (When toggled) */}
+      {showApiInspector && (
+        <div className="p-4 bg-[#1e2029] text-[#e0e2ec] rounded-2xl border border-[#434654] font-mono text-xs shadow-xl animate-fadeIn">
+          <div className="flex items-center justify-between pb-2 border-b border-[#434654] mb-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="font-bold text-emerald-400">LTA DataMall v3 Endpoint:</span>
+              <span className="text-gray-300">
+                /api/bus-arrival?busStopCode={stop.id}
+                {selectedServiceFilter !== 'ALL' ? `&serviceNo=${selectedServiceFilter}` : ''}
+              </span>
+            </div>
+            <span className="text-gray-400 text-[11px]">Last Call: {lastUpdated}</span>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto bg-[#14161f] p-3 rounded-xl text-[11px] leading-relaxed text-emerald-300">
+            {rawApiResponse ? (
+              <pre>{JSON.stringify(rawApiResponse, null, 2)}</pre>
+            ) : (
+              <div>
+                <p className="text-amber-400 mb-1">
+                  [Live Stream Simulation Engine Active - Ticking every 1s]
+                </p>
+                <pre>
+                  {JSON.stringify(
+                    {
+                      BusStopCode: stop.id,
+                      ActiveServicesCount: liveArrivals.length,
+                      Services: liveArrivals.map((s) => ({
+                        ServiceNo: s.routeNumber,
+                        Operator: s.operator,
+                        NextBus: s.arrivals[0]
+                          ? {
+                              EstimatedArrival: s.arrivals[0].scheduledTime,
+                              Load: s.arrivals[0].occupancy,
+                              Feature: s.arrivals[0].isAccessible ? 'WAB' : 'Standard',
+                              Type: s.arrivals[0].busType,
+                            }
+                          : null,
+                      })),
+                    },
+                    null,
+                    2
+                  )}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Stop Header Info Card with Prominent Stop Number */}
       <div
@@ -191,8 +268,9 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                     {stop.roadName}
                   </span>
                 )}
-                <span className="font-label-caps text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-bold">
-                  ALL SERVICES LIVE ({allKnownServices.length})
+                <span className="font-label-caps text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping" />
+                  <span>REAL-TIME LIVE SERVICES ({allKnownServices.length})</span>
                 </span>
               </div>
               <h1 className="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-[#191b23] mb-1 font-bold">
@@ -229,7 +307,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
           </div>
         </div>
 
-        {/* Dedicated "All Bus Services Under This Stop" Bar */}
+        {/* Dedicated "All Bus Services Under This Stop" Bar with Real-Time Ticking Pills */}
         <div className="pt-4 border-t border-[#ededf8] flex flex-col gap-2.5">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
@@ -237,7 +315,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                 directions_bus
               </span>
               <h3 className="font-label-caps text-xs font-bold text-[#191b23] tracking-wide">
-                ALL BUS SERVICES AT THIS STOP ({allKnownServices.length})
+                BUS SERVICES AT THIS STOP ({allKnownServices.length}) • REAL-TIME ETAS
               </h3>
             </div>
             {selectedServiceFilter !== 'ALL' && (
@@ -250,25 +328,31 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
             )}
           </div>
 
-          {/* Interactive Bus Services Chips List */}
+          {/* Interactive Bus Services Chips List with Live Real-Time Ticking Badges */}
           <div className="flex flex-wrap items-center gap-2">
             {/* "All" button */}
             <button
               id="chip-service-all"
               onClick={() => setSelectedServiceFilter('ALL')}
-              className={`px-3 py-1.5 rounded-xl font-label-caps text-xs font-bold transition-all cursor-pointer select-none flex items-center gap-1.5 active:scale-95 shadow-xs ${
+              className={`px-3.5 py-2 rounded-xl font-label-caps text-xs font-bold transition-all cursor-pointer select-none flex items-center gap-1.5 active:scale-95 shadow-xs ${
                 selectedServiceFilter === 'ALL'
                   ? 'bg-[#003d9b] text-[#ffffff] ring-2 ring-[#001848]'
                   : 'bg-[#f3f3fd] text-[#434654] border border-[#c3c6d6] hover:bg-[#e1e2ec]'
               }`}
             >
               <span>All Services</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${selectedServiceFilter === 'ALL' ? 'bg-[#001848] text-[#ffffff]' : 'bg-[#ededf8] text-[#515f74]'}`}>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                  selectedServiceFilter === 'ALL'
+                    ? 'bg-[#001848] text-[#ffffff]'
+                    : 'bg-[#ededf8] text-[#515f74]'
+                }`}
+              >
                 {allKnownServices.length}
               </span>
             </button>
 
-            {/* Individual Bus Service Pills with Live Eta preview */}
+            {/* Individual Bus Service Pills with Live Countdown preview */}
             {allKnownServices.map((srv) => {
               const isSelected = selectedServiceFilter === srv;
               const nextEta = serviceNextArrivalMap.get(srv);
@@ -288,15 +372,15 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                   <span className="font-mono text-sm">Bus {srv}</span>
                   {nextEta && (
                     <span
-                      className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                      className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
                         isSelected
                           ? 'bg-[#ffffff] text-[#001848]'
-                          : nextEta === 'Arr'
-                          ? 'bg-emerald-600 text-[#ffffff]'
+                          : nextEta.isArriving
+                          ? 'bg-emerald-600 text-[#ffffff] animate-pulse'
                           : 'bg-[#003d9b] text-[#ffffff]'
                       }`}
                     >
-                      {nextEta}
+                      {nextEta.text}
                     </span>
                   )}
                 </button>
@@ -356,6 +440,17 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
             const secondArrival = route.arrivals[1];
             const thirdArrival = route.arrivals[2];
 
+            // Live ticking countdown for first arrival
+            const countdown1 = firstArrival
+              ? formatLiveCountdown(firstArrival.estimatedArrivalTimestamp, firstArrival.minutes)
+              : null;
+            const countdown2 = secondArrival
+              ? formatLiveCountdown(secondArrival.estimatedArrivalTimestamp, secondArrival.minutes)
+              : null;
+            const countdown3 = thirdArrival
+              ? formatLiveCountdown(thirdArrival.estimatedArrivalTimestamp, thirdArrival.minutes)
+              : null;
+
             return (
               <article
                 key={route.routeNumber}
@@ -390,15 +485,15 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                   </button>
                 </div>
 
-                {/* Arrivals List */}
+                {/* Arrivals List with Second-by-Second Real-Time Ticking */}
                 <div className="p-4 space-y-3 flex-grow">
-                  {/* Arrival 1 (Hero Arrival) */}
-                  {firstArrival && (
+                  {/* Arrival 1 (Hero Real-Time Arrival) */}
+                  {firstArrival && countdown1 && (
                     <div
                       id={`arrival-1-${route.routeNumber}`}
                       className={`flex justify-between items-center p-3.5 bg-[#f3f3fd] rounded-xl border-l-4 transition-all ${
-                        firstArrival.minutes <= 2
-                          ? 'border-emerald-500 bg-emerald-50/50'
+                        countdown1.isArriving
+                          ? 'border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-200'
                           : firstArrival.isDelayed
                           ? 'border-[#ba1a1a]'
                           : 'border-[#003d9b]'
@@ -407,23 +502,19 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                       <div className="flex flex-col">
                         <div className="flex items-baseline gap-2">
                           <span
-                            className={`font-time-display text-time-display font-extrabold ${
-                              firstArrival.minutes <= 2
+                            className={`font-time-display text-time-display font-extrabold font-mono tracking-tight ${
+                              countdown1.isArriving
                                 ? 'text-emerald-700'
                                 : firstArrival.isDelayed
                                 ? 'text-[#ba1a1a]'
                                 : 'text-[#003d9b]'
                             }`}
                           >
-                            {firstArrival.minutes <= 0
-                              ? 'Arr'
-                              : firstArrival.minutes === 1
-                              ? '1 min'
-                              : `${firstArrival.minutes} mins`}
+                            {countdown1.text}
                           </span>
-                          {firstArrival.minutes <= 1 && (
+                          {countdown1.isArriving && (
                             <span className="font-label-caps text-[10px] bg-emerald-600 text-[#ffffff] px-1.5 py-0.5 rounded font-bold animate-pulse">
-                              ARRIVING
+                              ARRIVING NOW
                             </span>
                           )}
                           {firstArrival.isDelayed && (
@@ -436,15 +527,28 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                         <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                           <OccupancyBadge level={firstArrival.occupancy} />
                           {firstArrival.busType && (
-                            <span className="font-label-caps text-[10px] bg-[#e1e2ec] text-[#191b23] px-1.5 py-0.5 rounded font-bold" title={firstArrival.busType === 'DD' ? 'Double Deck Bus' : firstArrival.busType === 'BD' ? 'Bendy Bus' : 'Single Deck Bus'}>
-                              {firstArrival.busType === 'DD' ? 'Double Deck' : firstArrival.busType === 'BD' ? 'Bendy' : 'Single Deck'}
+                            <span
+                              className="font-label-caps text-[10px] bg-[#e1e2ec] text-[#191b23] px-1.5 py-0.5 rounded font-bold"
+                              title={
+                                firstArrival.busType === 'DD'
+                                  ? 'Double Deck Bus'
+                                  : firstArrival.busType === 'BD'
+                                  ? 'Bendy Bus'
+                                  : 'Single Deck Bus'
+                              }
+                            >
+                              {firstArrival.busType === 'DD'
+                                ? 'Double Deck'
+                                : firstArrival.busType === 'BD'
+                                ? 'Bendy'
+                                : 'Single Deck'}
                             </span>
                           )}
                         </div>
 
                         {firstArrival.busId && (
-                          <span className="font-label-caps text-[10px] text-[#737685] mt-1">
-                            {firstArrival.busId} • {firstArrival.scheduledTime}
+                          <span className="font-label-caps text-[10px] text-[#737685] mt-1 font-mono">
+                            {firstArrival.busId} • ETA {firstArrival.scheduledTime}
                           </span>
                         )}
                       </div>
@@ -462,17 +566,15 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                     </div>
                   )}
 
-                  {/* Arrival 2 */}
-                  {secondArrival && (
+                  {/* Arrival 2 (Subsequent Next Bus) */}
+                  {secondArrival && countdown2 && (
                     <div
                       id={`arrival-2-${route.routeNumber}`}
                       className="flex justify-between items-center p-2.5 bg-[#faf8ff] border border-[#ededf8] rounded-xl hover:bg-[#ffffff] transition-colors"
                     >
                       <div className="flex flex-col">
-                        <span className="font-time-display text-base font-bold text-[#191b23]">
-                          {secondArrival.minutes <= 0
-                            ? 'Next Arr'
-                            : `${secondArrival.minutes} mins`}
+                        <span className="font-time-display text-base font-bold text-[#191b23] font-mono">
+                          {countdown2.text}
                         </span>
                         <div className="mt-1 flex items-center gap-1.5">
                           <OccupancyBadge level={secondArrival.occupancy} />
@@ -501,17 +603,15 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                     </div>
                   )}
 
-                  {/* Arrival 3 */}
-                  {thirdArrival && (
+                  {/* Arrival 3 (3rd Subsequent Bus) */}
+                  {thirdArrival && countdown3 && (
                     <div
                       id={`arrival-3-${route.routeNumber}`}
-                      className="flex justify-between items-center p-2.5 opacity-80 rounded-xl hover:opacity-100 hover:bg-[#faf8ff] transition-all"
+                      className="flex justify-between items-center p-2.5 opacity-85 rounded-xl hover:opacity-100 hover:bg-[#faf8ff] transition-all border border-[#f3f3fd]"
                     >
                       <div className="flex flex-col">
-                        <span className="font-time-display text-sm font-semibold text-[#515f74]">
-                          {thirdArrival.minutes <= 0
-                            ? 'Subsequent Arr'
-                            : `${thirdArrival.minutes} mins`}
+                        <span className="font-time-display text-sm font-semibold text-[#515f74] font-mono">
+                          {countdown3.text}
                         </span>
                         <div className="mt-0.5">
                           <OccupancyBadge level={thirdArrival.occupancy} />

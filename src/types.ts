@@ -14,6 +14,8 @@ export interface ArrivalEstimate {
   latitude?: string;
   longitude?: string;
   isLive?: boolean;
+  estimatedArrivalTimestamp?: number; // Target epoch in ms for second-by-second countdown
+  estimatedArrivalIso?: string;
 }
 
 export interface RouteArrivalData {

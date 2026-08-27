@@ -151,8 +151,55 @@ export function calculateMinutesUntil(isoString?: string): number {
   const arrivalTime = new Date(isoString).getTime();
   const now = Date.now();
   const diffMs = arrivalTime - now;
-  const minutes = Math.round(diffMs / 60000);
-  return Math.max(0, minutes);
+  const minutes = Math.max(0, Math.round(diffMs / 60000));
+  return minutes;
+}
+
+// Convert seconds remaining to live countdown text (e.g. "2m 14s" or "Arriving")
+export function formatLiveCountdown(targetTimestamp?: number, fallbackMinutes: number = 0): {
+  text: string;
+  minutes: number;
+  seconds: number;
+  isArriving: boolean;
+} {
+  const now = Date.now();
+  let remainingMs = 0;
+
+  if (targetTimestamp && targetTimestamp > 0) {
+    remainingMs = Math.max(0, targetTimestamp - now);
+  } else {
+    remainingMs = Math.max(0, fallbackMinutes * 60 * 1000);
+  }
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (totalSeconds <= 30) {
+    return {
+      text: 'Arr',
+      minutes: 0,
+      seconds: totalSeconds,
+      isArriving: true,
+    };
+  }
+
+  if (totalSeconds < 60) {
+    return {
+      text: `${totalSeconds}s`,
+      minutes: 0,
+      seconds: totalSeconds,
+      isArriving: true,
+    };
+  }
+
+  const secPadded = seconds < 10 ? `0${seconds}` : `${seconds}`;
+  return {
+    text: `${minutes}m ${secPadded}s`,
+    minutes,
+    seconds: totalSeconds,
+    isArriving: false,
+  };
 }
 
 // Format ISO string to local 12-hour time (e.g. "8:42 AM")
@@ -160,7 +207,7 @@ export function formatScheduledTime(isoString?: string): string {
   if (!isoString) return '';
   try {
     const date = new Date(isoString);
-    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
   } catch {
     return '';
   }
@@ -169,6 +216,8 @@ export function formatScheduledTime(isoString?: string): string {
 // Transform LTA BusArrival response to RouteArrivalData[]
 export function transformLtaArrivals(ltaResponse: LtaBusArrivalResponse): RouteArrivalData[] {
   if (!ltaResponse || !ltaResponse.Services) return [];
+
+  const now = Date.now();
 
   return ltaResponse.Services.map((service) => {
     const arrivals: ArrivalEstimate[] = [];
@@ -181,10 +230,15 @@ export function transformLtaArrivals(ltaResponse: LtaBusArrivalResponse): RouteA
 
     buses.forEach(({ bus, key }) => {
       if (bus && bus.EstimatedArrival) {
-        const mins = calculateMinutesUntil(bus.EstimatedArrival);
+        const arrivalEpoch = new Date(bus.EstimatedArrival).getTime();
+        const diffMs = Math.max(0, arrivalEpoch - now);
+        const mins = Math.round(diffMs / 60000);
+
         arrivals.push({
           id: `${service.ServiceNo}-${key}-${bus.EstimatedArrival}`,
           minutes: mins,
+          estimatedArrivalTimestamp: arrivalEpoch,
+          estimatedArrivalIso: bus.EstimatedArrival,
           occupancy: parseLtaLoad(bus.Load),
           isAccessible: bus.Feature === 'WAB',
           busType: bus.Type,
@@ -247,11 +301,20 @@ export function generateRealTimeArrivalsForServices(stopId: string, services: st
     const offsetSeed = (stopNum * 13 + srvNum * 29) % 1000;
     
     // Cycle every 15-20 minutes for arrival 1
-    const cycleMinutes = 15;
-    const currentProgressSec = (Math.floor(now / 1000) + offsetSeed * 60) % (cycleMinutes * 60);
-    const min1 = Math.max(0, Math.floor((cycleMinutes * 60 - currentProgressSec) / 60) % 8);
-    const min2 = min1 + 6 + (srvNum % 6);
-    const min3 = min2 + 8 + ((srvNum * 3) % 8);
+    const cycleSeconds = 12 * 60; // 12-minute headway
+    const currentProgressSec = (Math.floor(now / 1000) + offsetSeed * 37) % cycleSeconds;
+    const sec1 = Math.max(15, cycleSeconds - currentProgressSec);
+    const min1 = Math.floor(sec1 / 60);
+
+    const sec2 = sec1 + (6 * 60) + ((srvNum * 43) % 240);
+    const min2 = Math.floor(sec2 / 60);
+
+    const sec3 = sec2 + (8 * 60) + ((srvNum * 71) % 300);
+    const min3 = Math.floor(sec3 / 60);
+
+    const epoch1 = now + (sec1 * 1000);
+    const epoch2 = now + (sec2 * 1000);
+    const epoch3 = now + (sec3 * 1000);
 
     const loads: OccupancyLevel[] = ['seats_available', 'standing_only', 'limited_space'];
     const load1 = loads[(srvNum + timeBlock10s) % 3];
@@ -265,35 +328,45 @@ export function generateRealTimeArrivalsForServices(stopId: string, services: st
     const type2 = types[(srvNum + stopNum + 1) % types.length];
     const type3 = types[(srvNum + stopNum + 2) % types.length];
 
+    const date1 = new Date(epoch1);
+    const date2 = new Date(epoch2);
+    const date3 = new Date(epoch3);
+
     const arrivals: ArrivalEstimate[] = [
       {
         id: `${srv}-nb1-${now}`,
         minutes: min1,
+        estimatedArrivalTimestamp: epoch1,
+        estimatedArrivalIso: date1.toISOString(),
         occupancy: load1,
         isAccessible: true,
         busType: type1,
         busId: getBusPlate(op, srvNum, 1),
-        scheduledTime: min1 === 0 ? 'Arriving' : min1 === 1 ? 'In 1 min' : `In ${min1} mins`,
+        scheduledTime: date1.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }),
         isLive: true,
       },
       {
         id: `${srv}-nb2-${now}`,
         minutes: min2,
+        estimatedArrivalTimestamp: epoch2,
+        estimatedArrivalIso: date2.toISOString(),
         occupancy: load2,
         isAccessible: true,
         busType: type2,
         busId: getBusPlate(op, srvNum, 2),
-        scheduledTime: `In ${min2} mins`,
+        scheduledTime: date2.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }),
         isLive: true,
       },
       {
         id: `${srv}-nb3-${now}`,
         minutes: min3,
+        estimatedArrivalTimestamp: epoch3,
+        estimatedArrivalIso: date3.toISOString(),
         occupancy: load3,
         isAccessible: true,
         busType: type3,
         busId: getBusPlate(op, srvNum, 3),
-        scheduledTime: `In ${min3} mins`,
+        scheduledTime: date3.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }),
         isLive: true,
       },
     ];

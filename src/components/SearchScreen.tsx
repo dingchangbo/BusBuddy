@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { TransitStop } from '../types';
 import { TRANSIT_STOPS, POPULAR_ROUTES, MAP_IMAGE_URL, findOrCreateStopByCode } from '../data/transitData';
+import { formatLiveCountdown, generateRealTimeArrivalsForServices } from '../services/ltaService';
 
 interface SearchScreenProps {
   onSelectStop: (stop: TransitStop) => void;
@@ -17,6 +18,15 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMapStopId, setSelectedMapStopId] = useState<string>('83139'); // Marine Parade (83139)
   const [selectedRouteFilter, setSelectedRouteFilter] = useState<string | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
+
+  // Second-by-second high-frequency ticker for real-time countdowns in search screen
+  useEffect(() => {
+    const ticker = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(ticker);
+  }, []);
 
   // Filter stops based on search query or selected route filter
   const filteredStops = useMemo(() => {
@@ -46,6 +56,24 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     return TRANSIT_STOPS.filter((s) => savedStopIds.includes(s.id));
   }, [savedStopIds]);
 
+  // Live real-time arrivals for searched stop if numeric code entered
+  const isNumericCode = /^\d{1,5}$/.test(searchQuery.trim());
+  const searchedResolvedStop = useMemo(() => {
+    if (isNumericCode && searchQuery.trim().length >= 2) {
+      return findOrCreateStopByCode(searchQuery.trim());
+    }
+    return null;
+  }, [searchQuery, isNumericCode]);
+
+  // Compute live real-time arrival estimates for the searched stop preview
+  const searchedStopLiveArrivals = useMemo(() => {
+    if (!searchedResolvedStop) return [];
+    return generateRealTimeArrivalsForServices(
+      searchedResolvedStop.id,
+      searchedResolvedStop.routes.slice(0, 6)
+    );
+  }, [searchedResolvedStop, Math.floor(now / 10000)]);
+
   const handleStopClick = (stop: TransitStop) => {
     onSelectStop(stop);
   };
@@ -65,8 +93,6 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     const resolvedStop = findOrCreateStopByCode(query);
     onSelectStop(resolvedStop);
   };
-
-  const isNumericCode = /^\d{1,5}$/.test(searchQuery.trim());
 
   return (
     <div className="flex-grow flex flex-col p-4 md:p-8 max-w-7xl mx-auto w-full gap-6">
@@ -123,32 +149,75 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           </button>
         </form>
 
-        {/* Quick Stop Number Banner if typing number */}
-        {searchQuery.trim().length > 0 && isNumericCode && (
+        {/* Real-time searched stop preview with live ticking arrival countdowns */}
+        {searchedResolvedStop && (
           <div
+            id="card-searched-stop-preview"
             onClick={() => handleSearchSubmit()}
-            className="mt-2 p-3.5 bg-[#dae2ff] hover:bg-[#c4d2ff] border border-[#003d9b]/30 rounded-xl cursor-pointer flex items-center justify-between transition-colors shadow-2xs"
+            className="mt-2 p-4 bg-[#f3f3fd] hover:bg-[#e8ebfb] border-2 border-[#003d9b] rounded-2xl cursor-pointer transition-all shadow-sm flex flex-col gap-3"
           >
-            <div className="flex items-center gap-2.5">
-              <span className="material-symbols-outlined text-[#003d9b] text-[22px]">travel_explore</span>
-              <div>
-                <p className="font-body-md font-bold text-[#001848] text-sm">
-                  View Real-Time Bus Services for Stop #{searchQuery.trim()}
-                </p>
-                <p className="font-label-caps text-xs text-[#003d9b]">
-                  Press Enter or click to fetch all real-time bus arrivals
-                </p>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <div className="bg-[#003d9b] text-[#ffffff] px-3 py-1.5 rounded-xl font-mono text-base font-extrabold shadow-2xs">
+                  STOP #{searchedResolvedStop.id}
+                </div>
+                <div>
+                  <h3 className="font-headline-lg-mobile text-sm font-bold text-[#191b23]">
+                    {searchedResolvedStop.name}
+                  </h3>
+                  <p className="font-label-caps text-xs text-[#515f74]">
+                    {searchedResolvedStop.roadName || searchedResolvedStop.intersection}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-label-caps bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping" />
+                  <span>LIVE REFRESH</span>
+                </span>
+                <span className="font-label-caps text-xs bg-[#003d9b] text-[#ffffff] px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1">
+                  <span>Open Stop #{searchedResolvedStop.id}</span>
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </span>
               </div>
             </div>
-            <span className="font-label-caps text-xs bg-[#003d9b] text-[#ffffff] px-3 py-1.5 rounded-lg font-bold flex items-center gap-1">
-              <span>View Arrivals</span>
-              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-            </span>
+
+            {/* Live Ticking Bus Service Badges for searched stop */}
+            <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[#c3c6d6]/60">
+              <span className="text-[11px] font-label-caps text-[#515f74] font-bold">
+                Live Bus Arrivals ({searchedResolvedStop.routes.length} Services):
+              </span>
+              {searchedStopLiveArrivals.map((route) => {
+                const nextArr = route.arrivals[0];
+                const countdown = nextArr
+                  ? formatLiveCountdown(nextArr.estimatedArrivalTimestamp, nextArr.minutes)
+                  : { text: 'Live', isArriving: false };
+
+                return (
+                  <div
+                    key={route.routeNumber}
+                    className="bg-[#ffffff] border border-[#003d9b] px-2.5 py-1 rounded-xl flex items-center gap-1.5 shadow-2xs font-mono"
+                  >
+                    <span className="font-bold text-[#003d9b] text-xs">Bus {route.routeNumber}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
+                        countdown.isArriving
+                          ? 'bg-emerald-600 text-[#ffffff] animate-pulse'
+                          : 'bg-[#003d9b] text-[#ffffff]'
+                      }`}
+                    >
+                      {countdown.text}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
         {/* Autocomplete suggestions dropdown when typing */}
-        {searchQuery.trim().length > 0 && filteredStops.length > 0 && (
+        {searchQuery.trim().length > 0 && !searchedResolvedStop && filteredStops.length > 0 && (
           <div className="bg-[#ffffff] border border-[#c3c6d6] rounded-2xl shadow-xl z-30 max-h-80 overflow-y-auto divide-y divide-[#ededf8] mt-1">
             <ul className="py-1">
               {filteredStops.map((stop) => (
@@ -294,7 +363,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
             </div>
           )}
 
-          {/* Key Singapore Bus Stops with All Services */}
+          {/* Key Singapore Bus Stops with All Services and Live ETA counts */}
           <div
             id="card-recent-searches"
             className="bg-[#ffffff] border border-[#c3c6d6] rounded-2xl p-4 shadow-xs"
@@ -499,6 +568,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
               <div className="space-y-1.5 my-2 text-xs text-[#434654]">
                 {activeMapStop.routeArrivals.slice(0, 3).map((ra) => {
                   const nextArrival = ra.arrivals[0];
+                  const cd = nextArrival
+                    ? formatLiveCountdown(nextArrival.estimatedArrivalTimestamp, nextArrival.minutes)
+                    : null;
                   return (
                     <div key={ra.routeNumber} className="flex items-center justify-between py-1 border-b border-[#ededf8] last:border-0">
                       <div className="flex items-center gap-1.5 font-medium text-[#191b23]">
@@ -508,7 +580,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                         <span className="text-xs truncate max-w-[130px]">{ra.routeName}</span>
                       </div>
                       <span className="font-label-caps font-bold text-[#003d9b] text-xs">
-                        {nextArrival ? (nextArrival.minutes <= 1 ? 'Arriving' : `${nextArrival.minutes}m`) : 'Active'}
+                        {cd ? cd.text : 'Active'}
                       </span>
                     </div>
                   );
