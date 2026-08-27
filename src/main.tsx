@@ -7,7 +7,10 @@ import './index.css';
 window.addEventListener('error', (event) => {
   if (
     event.message === 'Script error.' ||
-    (event.filename && (event.filename.includes('disqus') || event.filename.includes('google')))
+    (event.filename &&
+      (event.filename.includes('disqus') ||
+        event.filename.includes('google') ||
+        event.filename.includes('clarity')))
   ) {
     event.preventDefault();
     return true;
