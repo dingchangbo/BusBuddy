@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { TransitStop } from '../types';
-import { TRANSIT_STOPS, POPULAR_ROUTES, MAP_IMAGE_URL } from '../data/transitData';
+import { TRANSIT_STOPS, POPULAR_ROUTES, MAP_IMAGE_URL, findOrCreateStopByCode } from '../data/transitData';
 
 interface SearchScreenProps {
   onSelectStop: (stop: TransitStop) => void;
@@ -55,46 +55,18 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     setSelectedMapStopId(stopId);
   };
 
-  // If user entered a 5-digit numeric stop code directly
-  const isCustomStopCode = /^\d{5}$/.test(searchQuery.trim());
-  const existingStopForCode = TRANSIT_STOPS.find((s) => s.id === searchQuery.trim());
+  // Form submission handler (Enter key or Search button)
+  const handleSearchSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) return;
 
-  const handleQueryCustomStop = () => {
-    const code = searchQuery.trim();
-    if (existingStopForCode) {
-      onSelectStop(existingStopForCode);
-      return;
-    }
-    // Create dynamically for any Singapore stop code
-    const dynamicStop: TransitStop = {
-      id: code,
-      name: `Bus Stop ${code}`,
-      intersection: `Bus Stop Code ${code}, Singapore`,
-      roadName: 'Singapore Transit Network',
-      distance: 'Live Stop',
-      routes: ['15', '36', '196'],
-      coordinates: { x: 50, y: 50 },
-      routeArrivals: [
-        {
-          routeNumber: '15',
-          routeName: `Service 15 (Stop #${code})`,
-          via: 'LTA DataMall Stream',
-          operator: 'GAS',
-          arrivals: [
-            {
-              id: `arr-${code}-1`,
-              minutes: 3,
-              occupancy: 'seats_available',
-              isAccessible: true,
-              busType: 'DD',
-              isLive: true,
-            },
-          ],
-        },
-      ],
-    };
-    onSelectStop(dynamicStop);
+    // Use intelligent Singapore stop resolver (resolves exact stop or creates dynamic stop with all services)
+    const resolvedStop = findOrCreateStopByCode(query);
+    onSelectStop(resolvedStop);
   };
+
+  const isNumericCode = /^\d{1,5}$/.test(searchQuery.trim());
 
   return (
     <div className="flex-grow flex flex-col p-4 md:p-8 max-w-7xl mx-auto w-full gap-6">
@@ -106,113 +78,161 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
               Singapore Live Bus Arrivals
             </h1>
             <p className="font-body-lg text-body-lg text-[#434654] text-sm md:text-base">
-              Enter 5-digit bus stop number (e.g. <strong>83139</strong>, <strong>01012</strong>, <strong>09048</strong>), road name, or bus service.
+              Enter any 5-digit bus stop number (e.g. <strong>83139</strong>, <strong>01012</strong>, <strong>09048</strong>, <strong>54009</strong>) to view all real-time bus arrivals.
             </p>
           </div>
         </div>
 
-        {/* Search Bar */}
-        <div className="relative w-full mt-3">
-          <span
-            className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[#434654] pointer-events-none"
-            aria-hidden="true"
-          >
-            search
-          </span>
-          <input
-            id="input-stop-search"
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search stop number (e.g. 83139), Marine Parade, Orchard, Bugis, Service 15..."
-            className="w-full h-14 pl-12 pr-12 bg-[#ffffff] border-2 border-[#c3c6d6] focus:border-[#003d9b] rounded-2xl font-body-lg text-body-lg text-[#191b23] placeholder:text-[#737685] outline-none transition-all shadow-xs"
-          />
-          {searchQuery && (
-            <button
-              id="btn-clear-search"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#737685] hover:text-[#191b23] rounded-full cursor-pointer"
-              aria-label="Clear search query"
+        {/* Search Bar with Submit Form */}
+        <form onSubmit={handleSearchSubmit} className="relative w-full mt-3 flex items-center gap-2">
+          <div className="relative flex-grow">
+            <span
+              className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[#434654] pointer-events-none text-[22px]"
+              aria-hidden="true"
             >
-              <span className="material-symbols-outlined text-[20px]">close</span>
-            </button>
-          )}
+              search
+            </span>
+            <input
+              id="input-stop-search"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search stop number (e.g. 83139), Marine Parade, Orchard, Bugis, Service 15..."
+              className="w-full h-14 pl-12 pr-12 bg-[#ffffff] border-2 border-[#c3c6d6] focus:border-[#003d9b] rounded-2xl font-body-lg text-body-lg text-[#191b23] placeholder:text-[#737685] outline-none transition-all shadow-xs"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                id="btn-clear-search"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#737685] hover:text-[#191b23] rounded-full cursor-pointer"
+                aria-label="Clear search query"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            )}
+          </div>
 
-          {/* Autocomplete suggestions dropdown when typing */}
-          {searchQuery.trim().length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-[#ffffff] border border-[#c3c6d6] rounded-2xl shadow-xl z-30 max-h-80 overflow-y-auto divide-y divide-[#ededf8]">
-              {/* If user typed a 5-digit number not found in local presets */}
-              {isCustomStopCode && !existingStopForCode && (
-                <div
-                  onClick={handleQueryCustomStop}
-                  className="p-3.5 bg-[#f3f3fd] hover:bg-[#dae2ff] cursor-pointer flex items-center justify-between text-[#003d9b] font-medium transition-colors"
+          <button
+            type="submit"
+            id="btn-submit-stop-search"
+            className="h-14 px-6 bg-[#003d9b] hover:bg-[#0052cc] text-[#ffffff] font-label-caps text-sm font-bold rounded-2xl transition-all shadow-sm active:scale-95 flex items-center gap-2 cursor-pointer shrink-0"
+          >
+            <span className="material-symbols-outlined text-[20px]">directions_bus</span>
+            <span className="hidden sm:inline">Search Stop</span>
+          </button>
+        </form>
+
+        {/* Quick Stop Number Banner if typing number */}
+        {searchQuery.trim().length > 0 && isNumericCode && (
+          <div
+            onClick={() => handleSearchSubmit()}
+            className="mt-2 p-3.5 bg-[#dae2ff] hover:bg-[#c4d2ff] border border-[#003d9b]/30 rounded-xl cursor-pointer flex items-center justify-between transition-colors shadow-2xs"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-[#003d9b] text-[22px]">travel_explore</span>
+              <div>
+                <p className="font-body-md font-bold text-[#001848] text-sm">
+                  View Real-Time Bus Services for Stop #{searchQuery.trim()}
+                </p>
+                <p className="font-label-caps text-xs text-[#003d9b]">
+                  Press Enter or click to fetch all real-time bus arrivals
+                </p>
+              </div>
+            </div>
+            <span className="font-label-caps text-xs bg-[#003d9b] text-[#ffffff] px-3 py-1.5 rounded-lg font-bold flex items-center gap-1">
+              <span>View Arrivals</span>
+              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </span>
+          </div>
+        )}
+
+        {/* Autocomplete suggestions dropdown when typing */}
+        {searchQuery.trim().length > 0 && filteredStops.length > 0 && (
+          <div className="bg-[#ffffff] border border-[#c3c6d6] rounded-2xl shadow-xl z-30 max-h-80 overflow-y-auto divide-y divide-[#ededf8] mt-1">
+            <ul className="py-1">
+              {filteredStops.map((stop) => (
+                <li
+                  key={stop.id}
+                  onClick={() => handleStopClick(stop)}
+                  className="px-4 py-3.5 hover:bg-[#f3f3fd] cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-2.5 transition-colors border-b border-[#f3f3fd] last:border-b-0"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[#003d9b]">travel_explore</span>
-                    <span>Query Live Bus Stop <strong>#{searchQuery.trim()}</strong> on LTA DataMall v3</span>
-                  </div>
-                  <span className="font-label-caps text-xs bg-[#003d9b] text-[#ffffff] px-2.5 py-1 rounded-lg font-bold">
-                    Query Stop #{searchQuery.trim()}
-                  </span>
-                </div>
-              )}
-
-              {filteredStops.length > 0 ? (
-                <ul className="py-1">
-                  {filteredStops.map((stop) => (
-                    <li
-                      key={stop.id}
-                      onClick={() => handleStopClick(stop)}
-                      className="px-4 py-3.5 hover:bg-[#f3f3fd] cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-2.5 transition-colors border-b border-[#f3f3fd] last:border-b-0"
-                    >
-                      <div className="min-w-0 flex-grow">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-label-caps text-xs bg-[#003d9b] text-[#ffffff] px-2.5 py-0.5 rounded-lg font-bold">
-                            STOP #{stop.id}
-                          </span>
-                          <p className="font-body-md font-bold text-[#191b23] text-sm">{stop.name}</p>
-                        </div>
-                        <p className="font-label-caps text-[#434654] text-xs mt-1">
-                          {stop.roadName ? `${stop.roadName} • ` : ''}{stop.intersection}
-                        </p>
-                      </div>
-
-                      {/* Display ALL bus services under this stop */}
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] font-label-caps text-[#515f74] font-semibold mr-1">
-                          Services ({stop.routes.length}):
-                        </span>
-                        {stop.routes.map((r) => (
-                          <span
-                            key={r}
-                            className="bg-[#ededf8] text-[#003d9b] font-label-caps text-xs font-bold px-2 py-0.5 rounded-md border border-[#c3c6d6]"
-                          >
-                            {r}
-                          </span>
-                        ))}
-                        <span className="material-symbols-outlined text-[#737685] ml-1">arrow_forward</span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                !isCustomStopCode && (
-                  <div className="p-5 text-center text-[#737685] font-body-md">
-                    No predefined transit stops found matching &quot;{searchQuery}&quot;.
-                    <p className="text-xs text-[#515f74] mt-1">
-                      Tip: Type any 5-digit bus stop number (e.g. 83139) to fetch live LTA arrivals.
+                  <div className="min-w-0 flex-grow">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-label-caps text-xs bg-[#003d9b] text-[#ffffff] px-2.5 py-0.5 rounded-lg font-bold">
+                        STOP #{stop.id}
+                      </span>
+                      <p className="font-body-md font-bold text-[#191b23] text-sm">{stop.name}</p>
+                    </div>
+                    <p className="font-label-caps text-[#434654] text-xs mt-1">
+                      {stop.roadName ? `${stop.roadName} • ` : ''}{stop.intersection}
                     </p>
                   </div>
-                )
-              )}
-            </div>
-          )}
+
+                  {/* Display ALL bus services under this stop */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-label-caps text-[#515f74] font-semibold mr-1">
+                      Services ({stop.routes.length}):
+                    </span>
+                    {stop.routes.map((r) => (
+                      <span
+                        key={r}
+                        className="bg-[#ededf8] text-[#003d9b] font-label-caps text-xs font-bold px-2 py-0.5 rounded-md border border-[#c3c6d6]"
+                      >
+                        {r}
+                      </span>
+                    ))}
+                    <span className="material-symbols-outlined text-[#737685] ml-1 text-[18px]">arrow_forward</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {/* Quick Stop Number Shortcuts */}
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <span className="font-label-caps text-xs text-[#515f74] font-bold">
+            QUICK SINGAPORE BUS STOP NUMBERS
+          </span>
+          <span className="font-label-caps text-xs text-[#737685]">
+            Click any stop number to see all real-time bus arrivals
+          </span>
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {[
+            { id: '83139', label: 'Marine Parade (83139)' },
+            { id: '01012', label: 'Bugis / Victoria St (01012)' },
+            { id: '09048', label: 'Orchard Rd (09048)' },
+            { id: '54009', label: 'Bishan Int (54009)' },
+            { id: '64009', label: 'Tampines Int (64009)' },
+            { id: '22009', label: 'Jurong East (22009)' },
+            { id: '43009', label: 'Woodlands (43009)' },
+            { id: '11119', label: 'Queenstown (11119)' },
+            { id: '84009', label: 'Bedok Int (84009)' },
+            { id: '28009', label: 'Clementi (28009)' },
+            { id: '65009', label: 'Punggol (65009)' },
+          ].map((quick) => (
+            <button
+              key={quick.id}
+              onClick={() => {
+                const stop = findOrCreateStopByCode(quick.id);
+                onSelectStop(stop);
+              }}
+              className="px-3 py-1.5 bg-[#ffffff] hover:bg-[#ededf8] text-[#003d9b] border border-[#c3c6d6] hover:border-[#003d9b] rounded-xl font-label-caps text-xs font-bold whitespace-nowrap transition-all shadow-2xs active:scale-95 cursor-pointer flex items-center gap-1.5"
+            >
+              <span className="bg-[#003d9b] text-[#ffffff] px-1.5 py-0.2 rounded text-[10px]">#{quick.id}</span>
+              <span>{quick.label.split(' (')[0]}</span>
+            </button>
+          ))}
         </div>
       </section>
 
       {/* Main Grid: Left Column (Recent & Popular) + Right Column (Map) */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 flex-grow mt-1">
-        {/* Left Column: Recent & Suggestions (5 cols on md/lg for full service badge space) */}
+        {/* Left Column: Recent & Suggestions (5 cols on md/lg) */}
         <div className="md:col-span-5 flex flex-col gap-5">
           {/* Saved Stops Card */}
           {savedStops.length > 0 && (
@@ -257,7 +277,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                     {/* Display all bus services under this stop */}
                     <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-[#ededf8]">
                       <span className="text-[10px] font-label-caps text-[#737685] font-semibold mr-1">
-                        All Bus Services:
+                        All Bus Services ({stop.routes.length}):
                       </span>
                       {stop.routes.map((r) => (
                         <span
@@ -281,7 +301,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           >
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-label-caps text-xs text-[#515f74] font-bold tracking-wider">
-                POPULAR SINGAPORE BUS STOPS
+                POPULAR SINGAPORE BUS HUBS &amp; STOPS
               </h2>
               <span className="text-xs text-[#737685] font-label-caps">
                 {TRANSIT_STOPS.length} Hubs
@@ -289,7 +309,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
             </div>
 
             <ul className="flex flex-col gap-3">
-              {TRANSIT_STOPS.slice(0, 5).map((stop) => (
+              {TRANSIT_STOPS.slice(0, 6).map((stop) => (
                 <li
                   key={stop.id}
                   onClick={() => handleStopClick(stop)}
