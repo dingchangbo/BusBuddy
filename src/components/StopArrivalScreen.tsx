@@ -26,6 +26,19 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toLocaleTimeString());
 
+  // Consolidate list of all bus services known for this stop
+  const allKnownServices = Array.from(
+    new Set([
+      ...stop.routes,
+      ...stop.routeArrivals.map((r) => r.routeNumber),
+      ...liveArrivals.map((r) => r.routeNumber),
+    ])
+  ).sort((a, b) => {
+    const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+    const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+    return numA !== numB ? numA - numB : a.localeCompare(b);
+  });
+
   // Fetch arrival estimates (Live v3 API or fallback)
   const refreshArrivals = useCallback(async () => {
     setIsRefreshing(true);
@@ -71,7 +84,25 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
     return () => clearInterval(timer);
   }, [refreshArrivals]);
 
-  const availableServices = ['ALL', ...Array.from(new Set(stop.routes))];
+  // Create a quick lookup map for next arrival minutes by service
+  const serviceNextArrivalMap = React.useMemo(() => {
+    const map = new Map<string, number | string>();
+    liveArrivals.forEach((r) => {
+      if (r.arrivals && r.arrivals.length > 0 && r.arrivals[0]) {
+        const m = r.arrivals[0].minutes;
+        map.set(r.routeNumber, m <= 0 ? 'Arr' : `${m}m`);
+      }
+    });
+    return map;
+  }, [liveArrivals]);
+
+  // Displayed arrival routes (filtered if user selected specific service)
+  const displayedRoutes = React.useMemo(() => {
+    if (selectedServiceFilter === 'ALL') {
+      return liveArrivals;
+    }
+    return liveArrivals.filter((r) => r.routeNumber === selectedServiceFilter);
+  }, [liveArrivals, selectedServiceFilter]);
 
   return (
     <div className="flex-grow w-full max-w-7xl mx-auto px-4 md:px-8 py-6 flex flex-col gap-6">
@@ -117,75 +148,147 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
         </div>
       </div>
 
-      {/* Stop Header Info Card */}
+      {/* Stop Header Info Card with Prominent Stop Number */}
       <div
         id="card-stop-header"
-        className="p-5 md:p-6 bg-[#ffffff] rounded-2xl border border-[#c3c6d6] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm"
+        className="p-5 md:p-6 bg-[#ffffff] rounded-2xl border border-[#c3c6d6] flex flex-col gap-5 shadow-sm"
       >
-        <div>
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="font-label-caps text-xs bg-[#003d9b] text-[#ffffff] px-2.5 py-0.5 rounded font-bold">
-              STOP CODE {stop.id}
-            </span>
-            {stop.roadName && (
-              <span className="font-label-caps text-xs text-[#515f74] bg-[#ededf8] px-2 py-0.5 rounded">
-                {stop.roadName}
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            {/* Prominent Stop Code Box */}
+            <div className="bg-[#003d9b] text-[#ffffff] px-4 py-3 rounded-2xl flex flex-col items-center justify-center min-w-[90px] shadow-sm shrink-0">
+              <span className="text-[10px] font-label-caps tracking-widest text-[#d5e3fd] font-bold uppercase">
+                STOP NO.
               </span>
-            )}
-            {isLiveConnected && (
-              <span className="font-label-caps text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-bold">
-                API SYNCED
+              <span className="text-2xl md:text-3xl font-extrabold tracking-tight font-mono">
+                {stop.id}
               </span>
-            )}
-          </div>
-          <h1 className="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-[#191b23] mb-1 font-bold">
-            {stop.name}
-          </h1>
-          <p className="font-body-md text-[#434654] flex items-center gap-1.5 text-sm">
-            <span className="material-symbols-outlined text-[#737685] text-[18px]">
-              location_on
-            </span>
-            <span>{stop.intersection}</span>
-          </p>
-        </div>
+            </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Filter by bus service */}
-          <div className="flex items-center gap-1.5 bg-[#f3f3fd] p-1 rounded-lg border border-[#c3c6d6]">
-            <span className="font-label-caps text-[11px] text-[#515f74] pl-2 font-bold hidden sm:inline">
-              Service:
-            </span>
-            <select
-              value={selectedServiceFilter}
-              onChange={(e) => setSelectedServiceFilter(e.target.value)}
-              className="bg-[#ffffff] text-[#191b23] border border-[#c3c6d6] rounded text-xs font-label-caps px-2.5 py-1.5 font-bold outline-none cursor-pointer"
-            >
-              {availableServices.map((srv) => (
-                <option key={srv} value={srv}>
-                  {srv === 'ALL' ? 'All Services' : `Service ${srv}`}
-                </option>
-              ))}
-            </select>
+            <div>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="font-label-caps text-xs text-[#003d9b] bg-[#e1e2ec] px-2.5 py-0.5 rounded font-bold">
+                  Bus Stop #{stop.id}
+                </span>
+                {stop.roadName && (
+                  <span className="font-label-caps text-xs text-[#515f74] bg-[#ededf8] px-2 py-0.5 rounded font-semibold">
+                    {stop.roadName}
+                  </span>
+                )}
+                {isLiveConnected && (
+                  <span className="font-label-caps text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-bold">
+                    LTA SYNCED
+                  </span>
+                )}
+              </div>
+              <h1 className="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-[#191b23] mb-1 font-bold">
+                {stop.name}
+              </h1>
+              <p className="font-body-md text-[#434654] flex items-center gap-1.5 text-sm">
+                <span className="material-symbols-outlined text-[#737685] text-[18px]">
+                  location_on
+                </span>
+                <span>{stop.intersection}</span>
+              </p>
+            </div>
           </div>
 
-          <button
-            id="btn-save-stop"
-            onClick={() => onToggleSaveStop(stop.id)}
-            className={`font-label-caps text-xs px-4 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-95 ${
-              isSaved
-                ? 'bg-[#d5e3fd] text-[#003d9b] border border-[#003d9b] font-bold'
-                : 'bg-[#003d9b] text-[#ffffff] hover:bg-[#0040a2]'
-            }`}
-          >
-            <span
-              className={`material-symbols-outlined text-sm ${
-                isSaved ? 'text-amber-500 font-variation-settings-fill' : 'text-[#ffffff]'
+          <div className="flex items-center gap-3 flex-wrap self-start md:self-auto">
+            <button
+              id="btn-save-stop"
+              onClick={() => onToggleSaveStop(stop.id)}
+              className={`font-label-caps text-xs px-4 py-2 rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-95 ${
+                isSaved
+                  ? 'bg-[#d5e3fd] text-[#003d9b] border border-[#003d9b] font-bold'
+                  : 'bg-[#003d9b] text-[#ffffff] hover:bg-[#0040a2]'
               }`}
             >
-              star
-            </span>
-            <span>{isSaved ? 'Saved Stop' : 'Save Stop'}</span>
-          </button>
+              <span
+                className={`material-symbols-outlined text-sm ${
+                  isSaved ? 'text-amber-500 font-variation-settings-fill' : 'text-[#ffffff]'
+                }`}
+              >
+                star
+              </span>
+              <span>{isSaved ? 'Saved Stop' : 'Save Stop'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Dedicated "All Bus Services Under This Stop" Bar */}
+        <div className="pt-4 border-t border-[#ededf8] flex flex-col gap-2.5">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[#003d9b] text-[20px]">
+                directions_bus
+              </span>
+              <h3 className="font-label-caps text-xs font-bold text-[#191b23] tracking-wide">
+                ALL BUS SERVICES AT THIS STOP ({allKnownServices.length})
+              </h3>
+            </div>
+            {selectedServiceFilter !== 'ALL' && (
+              <button
+                onClick={() => setSelectedServiceFilter('ALL')}
+                className="font-label-caps text-xs text-[#003d9b] hover:underline font-bold cursor-pointer"
+              >
+                Show All ({allKnownServices.length})
+              </button>
+            )}
+          </div>
+
+          {/* Interactive Bus Services Chips List */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* "All" button */}
+            <button
+              id="chip-service-all"
+              onClick={() => setSelectedServiceFilter('ALL')}
+              className={`px-3 py-1.5 rounded-xl font-label-caps text-xs font-bold transition-all cursor-pointer select-none flex items-center gap-1.5 active:scale-95 shadow-xs ${
+                selectedServiceFilter === 'ALL'
+                  ? 'bg-[#003d9b] text-[#ffffff] ring-2 ring-[#001848]'
+                  : 'bg-[#f3f3fd] text-[#434654] border border-[#c3c6d6] hover:bg-[#e1e2ec]'
+              }`}
+            >
+              <span>All Services</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${selectedServiceFilter === 'ALL' ? 'bg-[#001848] text-[#ffffff]' : 'bg-[#ededf8] text-[#515f74]'}`}>
+                {allKnownServices.length}
+              </span>
+            </button>
+
+            {/* Individual Bus Service Pills with Live Eta preview */}
+            {allKnownServices.map((srv) => {
+              const isSelected = selectedServiceFilter === srv;
+              const nextEta = serviceNextArrivalMap.get(srv);
+
+              return (
+                <button
+                  key={srv}
+                  id={`chip-service-${srv}`}
+                  onClick={() => setSelectedServiceFilter(isSelected ? 'ALL' : srv)}
+                  className={`px-3 py-1.5 rounded-xl font-label-caps text-xs font-bold transition-all cursor-pointer select-none flex items-center gap-1.5 active:scale-95 shadow-xs ${
+                    isSelected
+                      ? 'bg-[#001848] text-[#ffffff] ring-2 ring-[#0052cc]'
+                      : 'bg-[#ffffff] text-[#003d9b] border-2 border-[#003d9b] hover:bg-[#f3f3fd]'
+                  }`}
+                  title={`Filter to Service ${srv}`}
+                >
+                  <span className="font-mono text-sm">Bus {srv}</span>
+                  {nextEta && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                        isSelected
+                          ? 'bg-[#ffffff] text-[#001848]'
+                          : nextEta === 'Arr'
+                          ? 'bg-emerald-600 text-[#ffffff]'
+                          : 'bg-[#003d9b] text-[#ffffff]'
+                      }`}
+                    >
+                      {nextEta}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -215,18 +318,26 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
       {/* Arrivals Grid & Map Container */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Route Cards */}
-        {liveArrivals.length === 0 ? (
+        {displayedRoutes.length === 0 ? (
           <div className="col-span-full p-12 text-center bg-[#ffffff] rounded-2xl border border-[#c3c6d6] text-[#515f74]">
             <span className="material-symbols-outlined text-5xl mb-2 text-[#737685]">
               directions_bus
             </span>
-            <p className="font-bold text-base text-[#191b23]">No bus services currently found</p>
-            <p className="text-xs text-[#737685] mt-1">
-              Check service schedule or select another service filter.
+            <p className="font-bold text-base text-[#191b23]">
+              No active arrivals for Service {selectedServiceFilter}
             </p>
+            <p className="text-xs text-[#737685] mt-1">
+              Check service operating hours or reset filter to view all services at Stop #{stop.id}.
+            </p>
+            <button
+              onClick={() => setSelectedServiceFilter('ALL')}
+              className="mt-4 px-4 py-2 bg-[#003d9b] text-[#ffffff] rounded-xl font-label-caps text-xs font-bold hover:bg-[#0040a2] cursor-pointer"
+            >
+              View All {allKnownServices.length} Services
+            </button>
           </div>
         ) : (
-          liveArrivals.map((route) => {
+          displayedRoutes.map((route) => {
             const firstArrival = route.arrivals[0];
             const secondArrival = route.arrivals[1];
             const thirdArrival = route.arrivals[2];
@@ -250,7 +361,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                         </h2>
                       </div>
                       <p className="font-body-md text-xs text-[#515f74] mt-0.5">
-                        {route.operator ? `${route.operator} • ${route.via}` : route.via}
+                        {route.operator ? `${route.operator} • Stop #${stop.id}` : `Stop #${stop.id} • ${route.via}`}
                       </p>
                     </div>
                   </div>
@@ -407,11 +518,11 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                     onClick={() => onOpenSchedule(route)}
                     className="font-label-caps text-xs text-[#003d9b] hover:text-[#001848] font-bold flex items-center gap-1 cursor-pointer"
                   >
-                    <span>Full Route Stops</span>
+                    <span>Full Route Timetable</span>
                     <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
                   </button>
                   <span className="text-[10px] font-label-caps text-[#737685]">
-                    {route.arrivals.length} buses tracked
+                    Stop #{stop.id}
                   </span>
                 </div>
               </article>
@@ -429,8 +540,8 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
               <span className="material-symbols-outlined text-[#003d9b]">map</span>
               <span>Stop Map</span>
             </h2>
-            <span className="font-label-caps text-xs text-[#434654] bg-[#ededf8] px-2 py-0.5 rounded font-bold">
-              GPS: SG
+            <span className="font-label-caps text-xs text-[#003d9b] bg-[#e1e2ec] px-2 py-0.5 rounded font-bold">
+              STOP #{stop.id}
             </span>
           </div>
 
@@ -450,7 +561,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                 <span className="absolute -top-1 -right-1 w-3 h-3 bg-[#0052cc] rounded-full ring-2 ring-[#ffffff] animate-ping" />
               </div>
               <span className="font-label-caps text-xs bg-[#faf8ff] text-[#191b23] px-2 py-0.5 rounded shadow-md border border-[#c3c6d6] font-bold">
-                Stop {stop.id}
+                Stop #{stop.id}
               </span>
             </div>
 
@@ -458,7 +569,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
             <div className="absolute bottom-2 left-2 right-2 bg-[#ffffff]/95 backdrop-blur-sm border border-[#c3c6d6] px-3 py-2 rounded-xl text-xs font-label-caps text-[#434654] flex justify-between items-center shadow-xs">
               <span className="truncate max-w-[200px]">{stop.intersection}</span>
               <span className="text-[#003d9b] font-bold shrink-0">
-                {liveArrivals.length} services
+                {allKnownServices.length} bus services
               </span>
             </div>
           </div>
