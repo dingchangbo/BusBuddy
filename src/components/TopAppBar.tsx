@@ -23,10 +23,10 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
           id="btn-nav-home"
           onClick={onHomeClick}
           className="text-left group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#003d9b] rounded-lg p-1 transition-transform active:scale-95"
-          aria-label="TransitFlow Home"
+          aria-label="BusBuddy Home"
         >
           <span className="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg font-bold text-[#003d9b] tracking-tight">
-            TransitFlow
+            BusBuddy
           </span>
         </button>
       </div>

@@ -1,6 +1,6 @@
 {
-  "name": "TransitFlow",
-  "description": "Real-time urban transit tracking, live bus arrivals, stop discovery, and route schedules.",
+  "name": "BusBuddy",
+  "description": "Real-time Singapore bus arrivals, stop discovery, and route schedules.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
