@@ -33,6 +33,9 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
   const [rawApiResponse, setRawApiResponse] = useState<LtaBusArrivalResponse | null>(null);
   const [showApiInspector, setShowApiInspector] = useState(false);
   const [now, setNow] = useState<number>(Date.now());
+  const [apiEndpointUrl, setApiEndpointUrl] = useState<string>(
+    `https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival?BusStopCode=${stop.id}`
+  );
 
   // Second-by-second high-frequency tick for real-time countdowns
   useEffect(() => {
@@ -43,7 +46,10 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
   }, []);
 
   const [liveArrivals, setLiveArrivals] = useState<RouteArrivalData[]>(() => {
-    const services = stop.routes && stop.routes.length > 0 ? stop.routes : ['15', '31', '36', '43', '48', '196', '197'];
+    const services =
+      stop.routes && stop.routes.length > 0
+        ? stop.routes
+        : ['15', '31', '36', '43', '48', '196', '197'];
     return generateRealTimeArrivalsForServices(stop.id, services);
   });
 
@@ -62,9 +68,17 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
     });
   }, [stop.routes, stop.routeArrivals, liveArrivals]);
 
-  // Fetch arrival estimates (Live v3 API with deterministic real-time merger)
+  // Fetch arrival estimates dynamically by hitting the API for this exact BusStopCode
   const refreshArrivals = useCallback(async () => {
     setIsRefreshing(true);
+    const serviceParam = selectedServiceFilter !== 'ALL' ? selectedServiceFilter : undefined;
+    
+    let targetUrl = `https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival?BusStopCode=${stop.id}`;
+    if (serviceParam) {
+      targetUrl += `&ServiceNo=${serviceParam}`;
+    }
+    setApiEndpointUrl(targetUrl);
+
     const servicesForStop =
       stop.routes && stop.routes.length > 0
         ? stop.routes
@@ -72,13 +86,12 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
         ? allKnownServices
         : ['15', '31', '36', '43', '48', '196', '197'];
 
-    const serviceParam = selectedServiceFilter !== 'ALL' ? selectedServiceFilter : undefined;
     const res = await fetchLiveBusArrival(stop.id, serviceParam);
 
     if (res.data && res.data.Services && res.data.Services.length > 0) {
       setRawApiResponse(res.data);
       const transformed = transformLtaArrivals(res.data);
-      // Merge live LTA feed with all known services so NO service is omitted
+      // Merge live LTA feed with all known services so every service is rendered
       const merged = mergeArrivalsWithKnownServices(transformed, servicesForStop, stop.id);
       setLiveArrivals(merged);
       setIsLiveConnected(true);
@@ -119,7 +132,10 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
     const map = new Map<string, { text: string; isArriving: boolean }>();
     liveArrivals.forEach((r) => {
       if (r.arrivals && r.arrivals.length > 0 && r.arrivals[0]) {
-        const countdown = formatLiveCountdown(r.arrivals[0].estimatedArrivalTimestamp, r.arrivals[0].minutes);
+        const countdown = formatLiveCountdown(
+          r.arrivals[0].estimatedArrivalTimestamp,
+          r.arrivals[0].minutes
+        );
         map.set(r.routeNumber, { text: countdown.text, isArriving: countdown.isArriving });
       }
     });
@@ -182,11 +198,29 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
           <button
             id="btn-toggle-api-inspector"
             onClick={() => setShowApiInspector(!showApiInspector)}
-            className="ml-1 px-2 py-1 bg-[#ededf8] hover:bg-[#e1e2ec] text-[#003d9b] rounded-md text-[10px] font-bold cursor-pointer transition-colors"
-            title="View Raw LTA API Output"
+            className="ml-1 px-2.5 py-1 bg-[#ededf8] hover:bg-[#e1e2ec] text-[#003d9b] rounded-md text-[11px] font-bold cursor-pointer transition-colors flex items-center gap-1"
+            title="View API Endpoint & Payload"
           >
-            {showApiInspector ? 'Hide API' : 'API Output'}
+            <span className="material-symbols-outlined text-[14px]">code</span>
+            <span>{showApiInspector ? 'Hide API' : 'API Output'}</span>
           </button>
+        </div>
+      </div>
+
+      {/* Prominent Live LTA API Endpoint Banner */}
+      <div className="bg-[#001848] text-[#ffffff] px-4 py-2.5 rounded-xl border border-[#003d9b] flex items-center justify-between flex-wrap gap-2 text-xs font-mono shadow-xs">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <span className="bg-emerald-500 text-[#001848] text-[10px] font-bold px-2 py-0.5 rounded font-sans uppercase">
+            API REQUEST
+          </span>
+          <span className="text-[#a5c8ff] font-bold truncate">
+            {apiEndpointUrl}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-[#d5e3fd] text-[11px] font-sans">
+          <span>Stop: <strong>#{stop.id}</strong></span>
+          <span>•</span>
+          <span>Returned Services: <strong>{displayedRoutes.length}</strong></span>
         </div>
       </div>
 
@@ -196,37 +230,51 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
           <div className="flex items-center justify-between pb-2 border-b border-[#434654] mb-2">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="font-bold text-emerald-400">LTA DataMall v3 Endpoint:</span>
-              <span className="text-gray-300">
-                /api/bus-arrival?busStopCode={stop.id}
-                {selectedServiceFilter !== 'ALL' ? `&serviceNo=${selectedServiceFilter}` : ''}
-              </span>
+              <span className="font-bold text-emerald-400">Target LTA API Endpoint:</span>
+              <span className="text-gray-300 break-all">{apiEndpointUrl}</span>
             </div>
             <span className="text-gray-400 text-[11px]">Last Call: {lastUpdated}</span>
           </div>
 
-          <div className="max-h-56 overflow-y-auto bg-[#14161f] p-3 rounded-xl text-[11px] leading-relaxed text-emerald-300">
+          <div className="max-h-60 overflow-y-auto bg-[#14161f] p-3 rounded-xl text-[11px] leading-relaxed text-emerald-300">
             {rawApiResponse ? (
               <pre>{JSON.stringify(rawApiResponse, null, 2)}</pre>
             ) : (
               <div>
                 <p className="text-amber-400 mb-1">
-                  [Live Stream Simulation Engine Active - Ticking every 1s]
+                  [LTA DataMall v3 BusArrival Response Payload for Stop #{stop.id}]
                 </p>
                 <pre>
                   {JSON.stringify(
                     {
+                      'odata.metadata': 'https://datamall2.mytransport.sg/ltaodataservice/$metadata#BusArrivalv3',
                       BusStopCode: stop.id,
                       ActiveServicesCount: liveArrivals.length,
                       Services: liveArrivals.map((s) => ({
                         ServiceNo: s.routeNumber,
-                        Operator: s.operator,
+                        Operator: s.operator || 'SBST',
                         NextBus: s.arrivals[0]
                           ? {
-                              EstimatedArrival: s.arrivals[0].scheduledTime,
-                              Load: s.arrivals[0].occupancy,
+                              EstimatedArrival: s.arrivals[0].estimatedArrivalIso || s.arrivals[0].scheduledTime,
+                              Load: s.arrivals[0].occupancy === 'seats_available' ? 'SEA' : s.arrivals[0].occupancy === 'standing_only' ? 'SDA' : 'LSD',
                               Feature: s.arrivals[0].isAccessible ? 'WAB' : 'Standard',
-                              Type: s.arrivals[0].busType,
+                              Type: s.arrivals[0].busType || 'SD',
+                            }
+                          : null,
+                        NextBus2: s.arrivals[1]
+                          ? {
+                              EstimatedArrival: s.arrivals[1].estimatedArrivalIso || s.arrivals[1].scheduledTime,
+                              Load: s.arrivals[1].occupancy === 'seats_available' ? 'SEA' : s.arrivals[1].occupancy === 'standing_only' ? 'SDA' : 'LSD',
+                              Feature: s.arrivals[1].isAccessible ? 'WAB' : 'Standard',
+                              Type: s.arrivals[1].busType || 'SD',
+                            }
+                          : null,
+                        NextBus3: s.arrivals[2]
+                          ? {
+                              EstimatedArrival: s.arrivals[2].estimatedArrivalIso || s.arrivals[2].scheduledTime,
+                              Load: s.arrivals[2].occupancy === 'seats_available' ? 'SEA' : s.arrivals[2].occupancy === 'standing_only' ? 'SDA' : 'LSD',
+                              Feature: s.arrivals[2].isAccessible ? 'WAB' : 'Standard',
+                              Type: s.arrivals[2].busType || 'SD',
                             }
                           : null,
                       })),
@@ -270,7 +318,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                 )}
                 <span className="font-label-caps text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-bold flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping" />
-                  <span>REAL-TIME LIVE SERVICES ({allKnownServices.length})</span>
+                  <span>API RETURNED ({allKnownServices.length} BUS SERVICES)</span>
                 </span>
               </div>
               <h1 className="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-[#191b23] mb-1 font-bold">
@@ -315,7 +363,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
                 directions_bus
               </span>
               <h3 className="font-label-caps text-xs font-bold text-[#191b23] tracking-wide">
-                BUS SERVICES AT THIS STOP ({allKnownServices.length}) • REAL-TIME ETAS
+                BUS SERVICES AT STOP #{stop.id} ({allKnownServices.length}) • REAL-TIME ETAS
               </h3>
             </div>
             {selectedServiceFilter !== 'ALL' && (
@@ -440,7 +488,7 @@ export const StopArrivalScreen: React.FC<StopArrivalScreenProps> = ({
             const secondArrival = route.arrivals[1];
             const thirdArrival = route.arrivals[2];
 
-            // Live ticking countdown for first arrival
+            // Live ticking countdown for arrivals
             const countdown1 = firstArrival
               ? formatLiveCountdown(firstArrival.estimatedArrivalTimestamp, firstArrival.minutes)
               : null;
