@@ -7,6 +7,7 @@ import { TRANSIT_STOPS } from './data/transitData';
 import { TopAppBar } from './components/TopAppBar';
 import { SearchScreen } from './components/SearchScreen';
 import { StopArrivalScreen } from './components/StopArrivalScreen';
+import { DisqusComments } from './components/DisqusComments';
 import { ScheduleModal } from './components/ScheduleModal';
 import { DirectionsModal } from './components/DirectionsModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -149,6 +150,20 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Commuter Discussion Board powered by Disqus */}
+      <DisqusComments
+        pageIdentifier={
+          currentView === 'arrival' && selectedStop
+            ? `bus-stop-${selectedStop.id}`
+            : 'busbuddy-main-search'
+        }
+        pageTitle={
+          currentView === 'arrival' && selectedStop
+            ? `Bus Stop #${selectedStop.id} - ${selectedStop.name}`
+            : 'BusBuddy - Singapore Transit Search'
+        }
+      />
 
       {/* Footer */}
       <Footer />
