@@ -2,26 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   TransitStop,
   RouteArrivalData,
-  LtaCarParkItem,
-  LtaTrafficIncident,
-  LtaTrainServiceAlert,
 } from './types';
-import { TRANSIT_STOPS, SYSTEM_ALERTS, SAMPLE_CARPARKS } from './data/transitData';
+import { TRANSIT_STOPS } from './data/transitData';
 import { TopAppBar } from './components/TopAppBar';
 import { SearchScreen } from './components/SearchScreen';
 import { StopArrivalScreen } from './components/StopArrivalScreen';
 import { ScheduleModal } from './components/ScheduleModal';
 import { DirectionsModal } from './components/DirectionsModal';
-import { AlertsModal } from './components/AlertsModal';
 import { SettingsModal } from './components/SettingsModal';
-import { CarparkModal } from './components/CarparkModal';
 import { Footer } from './components/Footer';
-import {
-  checkLtaStatus,
-  fetchLiveCarparks,
-  fetchLiveTrafficIncidents,
-  fetchLiveTrainAlerts,
-} from './services/ltaService';
+import { checkLtaStatus } from './services/ltaService';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'search' | 'arrival'>('search');
@@ -37,41 +27,15 @@ export default function App() {
 
   const [activeScheduleRoute, setActiveScheduleRoute] = useState<RouteArrivalData | null>(null);
   const [directionsStopName, setDirectionsStopName] = useState<string | null>(null);
-  const [isAlertsModalOpen, setIsAlertsModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [isCarparkModalOpen, setIsCarparkModalOpen] = useState(false);
 
   // Live LTA data state
   const [isApiConfigured, setIsApiConfigured] = useState(false);
-  const [carparks, setCarparks] = useState<LtaCarParkItem[]>(SAMPLE_CARPARKS as LtaCarParkItem[]);
-  const [isLoadingCarparks, setIsLoadingCarparks] = useState(false);
-  const [trafficIncidents, setTrafficIncidents] = useState<LtaTrafficIncident[]>([]);
-  const [trainAlert, setTrainAlert] = useState<LtaTrainServiceAlert | null>(null);
 
   // Initial load of LTA metadata and status
   const loadLtaData = useCallback(async () => {
     const status = await checkLtaStatus();
     setIsApiConfigured(status.configured);
-
-    // Fetch Carparks
-    setIsLoadingCarparks(true);
-    const cpRes = await fetchLiveCarparks();
-    if (cpRes.data && cpRes.data.value && cpRes.data.value.length > 0) {
-      setCarparks(cpRes.data.value);
-    }
-    setIsLoadingCarparks(false);
-
-    // Fetch Traffic Incidents
-    const tfRes = await fetchLiveTrafficIncidents();
-    if (tfRes.data && tfRes.data.value) {
-      setTrafficIncidents(tfRes.data.value);
-    }
-
-    // Fetch Train Alerts
-    const taRes = await fetchLiveTrainAlerts();
-    if (taRes.data && taRes.data.value) {
-      setTrainAlert(taRes.data.value);
-    }
   }, []);
 
   useEffect(() => {
@@ -109,8 +73,6 @@ export default function App() {
     }
   };
 
-  const totalAlertCount = SYSTEM_ALERTS.length + trafficIncidents.length + (trainAlert && trainAlert.Status === 2 ? 1 : 0);
-
   return (
     <div className="bg-[#faf8ff] text-[#191b23] min-h-screen flex flex-col font-sans selection:bg-[#c4d2ff] selection:text-[#001848]">
       {/* Top Header */}
@@ -118,9 +80,7 @@ export default function App() {
         onHomeClick={() => setCurrentView('search')}
         onSearchClick={() => setCurrentView('search')}
         showSearchButton={currentView === 'arrival'}
-        onNotificationsClick={() => setIsAlertsModalOpen(true)}
         onSettingsClick={() => setIsSettingsModalOpen(true)}
-        unreadAlertCount={totalAlertCount}
       />
 
       {/* Screen View Toggle Switcher */}
@@ -154,14 +114,6 @@ export default function App() {
               Live Arrivals ({selectedStop ? selectedStop.id : '83139'})
             </button>
           </div>
-
-          <button
-            onClick={() => setIsCarparkModalOpen(true)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-label-caps rounded-lg bg-[#ffffff] text-[#003d9b] border border-[#c3c6d6] hover:bg-[#f3f3fd] transition-all cursor-pointer shadow-xs"
-          >
-            <span className="material-symbols-outlined text-[16px]">local_parking</span>
-            <span className="hidden sm:inline">Carparks</span>
-          </button>
         </div>
 
         <div className="flex items-center gap-3">
@@ -185,8 +137,6 @@ export default function App() {
             onSelectStop={handleSelectStop}
             onOpenSchedule={handleOpenScheduleByRouteNumber}
             onOpenDirections={(stopName) => setDirectionsStopName(stopName)}
-            onOpenCarparks={() => setIsCarparkModalOpen(true)}
-            onOpenAlerts={() => setIsAlertsModalOpen(true)}
             savedStopIds={savedStopIds}
           />
         ) : (
@@ -215,27 +165,6 @@ export default function App() {
         <DirectionsModal
           destinationStopName={directionsStopName}
           onClose={() => setDirectionsStopName(null)}
-        />
-      )}
-
-      {isAlertsModalOpen && (
-        <AlertsModal
-          alerts={SYSTEM_ALERTS}
-          trafficIncidents={trafficIncidents}
-          trainAlert={trainAlert}
-          isLoading={false}
-          onRefresh={loadLtaData}
-          onClose={() => setIsAlertsModalOpen(false)}
-        />
-      )}
-
-      {isCarparkModalOpen && (
-        <CarparkModal
-          carparks={carparks}
-          isLoading={isLoadingCarparks}
-          isConfigured={isApiConfigured}
-          onRefresh={loadLtaData}
-          onClose={() => setIsCarparkModalOpen(false)}
         />
       )}
 

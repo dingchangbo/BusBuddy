@@ -6,16 +6,12 @@ interface SearchScreenProps {
   onSelectStop: (stop: TransitStop) => void;
   onOpenSchedule: (routeNumber: string) => void;
   onOpenDirections: (stopName: string) => void;
-  onOpenCarparks?: () => void;
-  onOpenAlerts?: () => void;
   savedStopIds: string[];
 }
 
 export const SearchScreen: React.FC<SearchScreenProps> = ({
   onSelectStop,
   onOpenDirections,
-  onOpenCarparks,
-  onOpenAlerts,
   savedStopIds,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -112,28 +108,6 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
             <p className="font-body-lg text-body-lg text-[#434654] text-sm md:text-base">
               Enter 5-digit bus stop number (e.g. <strong>83139</strong>, <strong>01012</strong>, <strong>09048</strong>), road name, or bus service.
             </p>
-          </div>
-
-          {/* Quick Action Badges (Carparks & Alerts) */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {onOpenCarparks && (
-              <button
-                onClick={onOpenCarparks}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#ffffff] hover:bg-[#ededf8] text-[#003d9b] font-label-caps text-xs font-bold rounded-xl border border-[#c3c6d6] shadow-xs cursor-pointer transition-all active:scale-95"
-              >
-                <span className="material-symbols-outlined text-[18px]">local_parking</span>
-                <span>Live Carpark Lots</span>
-              </button>
-            )}
-            {onOpenAlerts && (
-              <button
-                onClick={onOpenAlerts}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#ffffff] hover:bg-[#ededf8] text-[#191b23] font-label-caps text-xs font-bold rounded-xl border border-[#c3c6d6] shadow-xs cursor-pointer transition-all active:scale-95"
-              >
-                <span className="material-symbols-outlined text-[18px] text-[#ba1a1a]">warning</span>
-                <span>Traffic &amp; MRT Alerts</span>
-              </button>
-            )}
           </div>
         </div>
 
